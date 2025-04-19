@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template, Response, abort, make_response, redirect, session
+from flask import Flask, request, render_template, Response, abort, make_response
 import requests
 from urllib.parse import urlparse, urljoin, quote, unquote
 import json
@@ -7,48 +7,8 @@ import re
 import chardet
 from bs4 import BeautifulSoup
 import mimetypes
-import uuid
-import time
-from urllib.parse import parse_qs, urlencode
 
 app = Flask(__name__, template_folder='../templates', static_folder='../static')
-app.secret_key = os.urandom(24)  # セッション用のシークレットキー
-
-# セッション管理用の辞書
-sessions = {}
-
-def clean_old_sessions():
-    """古いセッションを削除"""
-    current_time = time.time()
-    for session_id in list(sessions.keys()):
-        if current_time - sessions[session_id]['timestamp'] > 3600:  # 1時間以上経過したセッションを削除
-            del sessions[session_id]
-
-def get_or_create_session():
-    """セッションの取得または作成"""
-    session_id = session.get('session_id')
-    if not session_id or session_id not in sessions:
-        session_id = str(uuid.uuid4())
-        session['session_id'] = session_id
-        sessions[session_id] = {
-            'timestamp': time.time(),
-            'cookies': {},
-            'headers': {}
-        }
-    return session_id
-
-def update_session_data(session_id, response):
-    """セッションデータの更新"""
-    if session_id in sessions:
-        sessions[session_id]['timestamp'] = time.time()
-        for cookie in response.cookies:
-            sessions[session_id]['cookies'][cookie.name] = {
-                'value': cookie.value,
-                'domain': cookie.domain,
-                'path': cookie.path,
-                'expires': cookie.expires,
-                'secure': cookie.secure
-            }
 
 def process_css_content(css_content, base_url):
     """CSSファイル内のURLをプロキシ経由に変換する"""
@@ -224,10 +184,6 @@ def proxy():
         return render_template('index.html', error='URLが指定されていません')
 
     try:
-        # セッション管理
-        clean_old_sessions()
-        session_id = get_or_create_session()
-
         # URLの検証
         parsed_url = urlparse(url)
         if not parsed_url.scheme or not parsed_url.netloc:
@@ -245,123 +201,50 @@ def proxy():
         }
         
         # User-Agentの設定
-        chrome_version = "112.0.0.0"
         headers.update({
-            'User-Agent': f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version} Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate',
             'Cache-Control': 'no-cache',
             'Pragma': 'no-cache',
-            'Sec-Ch-Ua': f'"Not.A/Brand";v="8", "Chromium";v="{chrome_version}", "Google Chrome";v="{chrome_version}"',
+            'Sec-Ch-Ua': '"Chromium";v="112", "Google Chrome";v="112", "Not:A-Brand";v="99"',
             'Sec-Ch-Ua-Mobile': '?0',
             'Sec-Ch-Ua-Platform': '"Windows"',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
             'Upgrade-Insecure-Requests': '1',
-            'Connection': 'keep-alive'
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1',
+            'Sec-Fetch-Dest': 'document'
         })
 
-        # Xboxドメイン特有の設定
+        # Originヘッダーの設定
         if 'xbox.com' in parsed_url.netloc:
-            headers.update({
-                'Origin': 'https://www.xbox.com',
-                'Referer': 'https://www.xbox.com/',
-                'authority': 'www.xbox.com',
-                'dnt': '1',
-                'x-forward-for': request.remote_addr,
-                'x-requested-with': 'XMLHttpRequest',
-                'x-ms-api-version': '2.0',
-                'x-ms-client-request-id': str(uuid.uuid4()),
-                'x-ms-correlation-id': str(uuid.uuid4()),
-                'x-xbox-isautomated': 'false',
-                'x-xbox-contract-version': '1',
-                'x-client-CPU': 'x86',
-                'x-client-SKU': 'web',
-                'accept-language': 'ja-JP'
-            })
+            headers['Origin'] = 'https://www.xbox.com'
+            headers['Referer'] = 'https://www.xbox.com/'
 
-            # 地域とロケール設定
-            headers['accept-language'] = 'ja-JP'
-            if '/ja-JP/' in url:
-                headers['x-xbox-locale'] = 'ja-JP'
-                headers['x-xbox-region'] = 'JP'
+        # クッキーの処理
+        if 'Cookie' in request.headers:
+            headers['Cookie'] = request.headers['Cookie']
 
-        # セッションのクッキーを追加
-        if session_id in sessions:
-            cookie_strings = []
-            for name, cookie_data in sessions[session_id]['cookies'].items():
-                if cookie_data['domain'] and parsed_url.netloc.endswith(cookie_data['domain'].lstrip('.')):
-                    cookie_strings.append(f"{name}={cookie_data['value']}")
-            if cookie_strings:
-                headers['Cookie'] = '; '.join(cookie_strings)
-
-        # セッション作成とリクエスト実行
-        req_session = requests.Session()
+        # セッション作成
+        session = requests.Session()
         
-        # プロキシパラメータの処理
-        params = {}
-        for key, value in request.args.items():
-            if key != 'url':
-                params[key] = value
-
-        # URLクエリパラメータの結合
-        url_parts = list(urlparse(url))
-        url_query = parse_qs(url_parts[4])
-        url_query.update(params)
-        url_parts[4] = urlencode(url_query, doseq=True)
-
-        # Xbox Cloud Gamingのパス処理
-        if '/play' in url:
-            url = urljoin(base_url, 'ja-JP/play')
-
         # リクエストの実行
-        response = req_session.request(
+        response = session.request(
             method=method,
             url=url,
             headers=headers,
             data=request.get_data() if method == 'POST' else None,
-            allow_redirects=False,  # リダイレクトは手動で処理
+            allow_redirects=True,
             timeout=30,
             verify=True
         )
 
-        # リダイレクト処理
-        max_redirects = 10
-        redirect_count = 0
-        while response.status_code in [301, 302, 303, 307, 308] and redirect_count < max_redirects:
-            location = response.headers.get('Location')
-            if not location:
-                break
-
-            # リダイレクト先URLの処理
-            if not location.startswith(('http://', 'https://')):
-                location = urljoin(url, location)
-
-            # セッションの更新
-            update_session_data(session_id, response)
-
-            # Xbox Cloud Gamingのパス処理
-            if '/play' in location:
-                location = urljoin(base_url, 'ja-JP/play')
-
-            # リダイレクト先へのリクエスト
-            response = req_session.request(
-                method=method if response.status_code in [307, 308] else 'GET',
-                url=location,
-                headers=headers,
-                allow_redirects=False,
-                timeout=30,
-                verify=True
-            )
-            redirect_count += 1
-
         # レスポンスヘッダーの準備
         response_headers = {}
         for key, value in response.headers.items():
-            if key.lower() not in ['content-encoding', 'transfer-encoding', 'content-length', 'connection', 'set-cookie']:
+            if key.lower() not in ['content-encoding', 'transfer-encoding', 'content-length', 'connection']:
                 response_headers[key] = value
 
         # Content-Typeの処理
@@ -372,10 +255,6 @@ def proxy():
                 content_type = 'application/octet-stream'
         
         response_headers['Content-Type'] = content_type
-
-        # エラー応答の処理
-        if response.status_code == 404 and 'xbox.com' in parsed_url.netloc:
-            return redirect('/proxy?url=https://www.xbox.com/ja-JP/play', code=302)
 
         # HTMLコンテンツの場合
         if 'text/html' in content_type:
@@ -391,20 +270,18 @@ def proxy():
                     headers=response_headers
                 ))
 
-                # セッションの更新とクッキーの転送
-                update_session_data(session_id, response)
-                for cookie in response.cookies:
-                    cookie_domain = cookie.domain if cookie.domain else parsed_url.netloc
-                    proxy_response.set_cookie(
-                        cookie.name,
-                        cookie.value,
-                        expires=cookie.expires,
-                        path=cookie.path,
-                        domain=cookie_domain,
-                        secure=cookie.secure,
-                        httponly=cookie.has_nonstandard_attr('HttpOnly'),
-                        samesite=cookie.get_nonstandard_attr('SameSite', 'Lax')
-                    )
+                # クッキーの転送
+                if 'Set-Cookie' in response.headers:
+                    for cookie in response.cookies:
+                        proxy_response.set_cookie(
+                            cookie.name,
+                            cookie.value,
+                            expires=cookie.expires,
+                            path=cookie.path,
+                            domain=cookie.domain,
+                            secure=cookie.secure,
+                            httponly=cookie.has_nonstandard_attr('HttpOnly')
+                        )
 
                 return proxy_response
 
@@ -422,16 +299,11 @@ def proxy():
                     content = process_css_content(content, url)
                 
                 response_headers['Content-Type'] = f'{content_type}; charset=utf-8'
-                proxy_response = make_response(Response(
+                return Response(
                     content,
                     status=response.status_code,
                     headers=response_headers
-                ))
-                
-                # セッションの更新
-                update_session_data(session_id, response)
-                return proxy_response
-
+                )
             except Exception as e:
                 return Response(
                     response.content,
@@ -440,15 +312,11 @@ def proxy():
                 )
 
         # その他のコンテンツタイプの場合
-        proxy_response = make_response(Response(
+        return Response(
             response.content,
             status=response.status_code,
             headers=response_headers
-        ))
-        
-        # セッションの更新
-        update_session_data(session_id, response)
-        return proxy_response
+        )
 
     except requests.RequestException as e:
         return render_template('index.html', error=f'エラーが発生しました: {str(e)}')
