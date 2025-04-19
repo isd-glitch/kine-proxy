@@ -183,55 +183,50 @@ def proxy():
     if not url:
         return render_template('index.html', error='URLが指定されていません')
 
-    try:
-        # URLの検証
+    # URL補正
+    def normalize_url(url):
         parsed_url = urlparse(url)
-        if not parsed_url.scheme or not parsed_url.netloc:
-            return render_template('index.html', error='無効なURLです')
+        if not parsed_url.scheme:
+            url = f"https://{url}"
+            parsed_url = urlparse(url)
+        return url if parsed_url.netloc else None
+    parsed_url = urlparse(url)
+    url = normalize_url(url)
+    if not url:
+        return render_template('index.html', error='無効なURLです')
 
-        base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-        if parsed_url.path:
+    parsed_url = urlparse(url)
+    base_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}?{parsed_url.query}"
+    if parsed_url.path:
             base_url = urljoin(base_url, os.path.dirname(parsed_url.path))
-
-        # プロキシリクエストの作成
-        method = request.method
-        headers = {
-            key: value for key, value in request.headers.items()
-            if key.lower() not in ['host', 'content-length']
-        }
-        
-        # User-Agentの設定
-        headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
-            'Accept-Encoding': 'gzip, deflate',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-            'Sec-Ch-Ua': '"Chromium";v="112", "Google Chrome";v="112", "Not:A-Brand";v="99"',
-            'Sec-Ch-Ua-Mobile': '?0',
-            'Sec-Ch-Ua-Platform': '"Windows"',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-User': '?1',
-            'Sec-Fetch-Dest': 'document'
-        })
-
-        # Originヘッダーの設定
-        if 'xbox.com' in parsed_url.netloc:
-            headers['Origin'] = 'https://www.xbox.com'
-            headers['Referer'] = 'https://www.xbox.com/'
-
-        # クッキーの処理
-        if 'Cookie' in request.headers:
-            headers['Cookie'] = request.headers['Cookie']
-
-        # セッション作成
-        session = requests.Session()
-        
-        # リクエストの実行
-        response = session.request(
+            method = request.method
+            headers = {
+                key: value for key, value in request.headers.items()
+                if key.lower() not in ['host', 'content-length']
+                }
+            headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Sec-Ch-Ua': '"Chromium";v="112", "Google Chrome";v="112", "Not:A-Brand";v="99"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-User': '?1',
+                'Sec-Fetch-Dest': 'document'
+                })
+            if 'xbox.com' in parsed_url.netloc:
+                headers['Origin'] = 'https://www.xbox.com'
+                headers['Referer'] = 'https://www.xbox.com/'
+                if 'Cookie' in request.headers:
+                    headers['Cookie'] = request.headers['Cookie']
+                    session = requests.Session()
+                    response = session.request(
             method=method,
             url=url,
             headers=headers,
@@ -240,25 +235,18 @@ def proxy():
             timeout=30,
             verify=True
         )
-
-        # レスポンスヘッダーの準備
-        response_headers = {}
-        for key, value in response.headers.items():
-            if key.lower() not in ['content-encoding', 'transfer-encoding', 'content-length', 'connection']:
-                response_headers[key] = value
-
-        # Content-Typeの処理
-        content_type = response.headers.get('content-type', '').lower()
-        if not content_type:
-            content_type, _ = mimetypes.guess_type(url)
-            if not content_type:
-                content_type = 'application/octet-stream'
-        
-        response_headers['Content-Type'] = content_type
-
-        # HTMLコンテンツの場合
-        if 'text/html' in content_type:
-            encoding = detect_encoding(response)
+                    response_headers = {}
+                    for key, value in response.headers.items():
+                        if key.lower() not in ['content-encoding', 'transfer-encoding', 'content-length', 'connection']:
+                            response_headers[key] = value
+                            content_type = response.headers.get('content-type', '').lower()
+                            if not content_type:
+                                content_type, _ = mimetypes.guess_type(url)
+                                if not content_type:
+                                    content_type = 'application/octet-stream'
+                                    response_headers['Content-Type'] = content_type
+                                    if 'text/html' in content_type:
+                                        encoding = detect_encoding(response)
             try:
                 content = response.content.decode(encoding, errors='replace')
                 content = modify_html_content(content, url)
@@ -287,9 +275,7 @@ def proxy():
 
             except Exception as e:
                 return render_template('index.html', error=f'エンコーディングエラー: {str(e)}')
-
-        # CSS/JavaScriptの場合
-        elif any(type_match in content_type for type_match in ['text/css', 'javascript', 'json']):
+    elif any(type_match in content_type for type_match in ['text/css', 'javascript', 'json']):
             try:
                 encoding = detect_encoding(response)
                 content = response.content.decode(encoding, errors='replace')
@@ -310,19 +296,17 @@ def proxy():
                     status=response.status_code,
                     headers=response_headers
                 )
-
-        # その他のコンテンツタイプの場合
-        return Response(
+            return Response(
             response.content,
             status=response.status_code,
             headers=response_headers
         )
-
     except requests.RequestException as e:
-        return render_template('index.html', error=f'エラーが発生しました: {str(e)}')
+    return render_template('index.html', error=f'エラーが発生しました: {str(e)}')
     except Exception as e:
-        return render_template('index.html', error=f'予期せぬエラーが発生しました: {str(e)}')
+    return render_template('index.html', error=f'予期せぬエラーが発生しました: {str(e)}')
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8000))
     app.run(debug=True, host='0.0.0.0', port=port, threaded=True)
+    
