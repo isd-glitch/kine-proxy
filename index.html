@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kine Proxy</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Kine Proxy</h1>
+    <form id="proxy-form">
+      <select id="http-method">
+        <option value="GET">GET</option>
+        <option value="POST">POST</option>
+        <option value="PUT">PUT</option>
+        <option value="DELETE">DELETE</option>
+      </select>
+      <input type="url" id="target-url" placeholder="アクセスしたいURLを入力" required>
+      <button type="submit">アクセス</button>
+      <button type="button" id="reset-btn">リセット</button>
+    </form>
+    <div class="headers-section">
+      <textarea id="custom-headers" placeholder="追加ヘッダー (key: value)\n複数行可"></textarea>
+    </div>
+    <div class="body-section">
+      <textarea id="request-body" placeholder="リクエストボディ (POST/PUT用)"></textarea>
+    </div>
+    <div class="options-section">
+      <label><input type="checkbox" id="show-iframe"> iframeで表示(HTMLのみ)</label>
+      <label><input type="checkbox" id="show-raw"> レスポンス生データ表示</label>
+    </div>
+    <div class="history-section">
+      <span>履歴:</span>
+      <select id="history-list"></select>
+      <button type="button" id="bookmark-btn">★ブックマーク</button>
+      <select id="bookmark-list"></select>
+    </div>
+    <div id="result">
+      <iframe id="proxy-frame" style="display:none;"></iframe>
+      <pre id="proxy-content"></pre>
+    </div>
+  </div>
+  <footer>Powered by <a href="https://corsproxy.io/" target="_blank">corsproxy.io</a></footer>
+  <script src="script.js"></script>
+</body>
+</html>
